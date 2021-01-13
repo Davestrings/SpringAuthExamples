@@ -1,0 +1,94 @@
+package com.example.auth.authentications.repository;
+
+import com.example.auth.authentications.domain.dto.Page;
+import com.example.auth.authentications.domain.dto.SearchAuthorsQuery;
+import com.example.auth.authentications.domain.exception.NotFoundException;
+import com.example.auth.authentications.domain.model.Author;
+import com.mongodb.internal.operation.AggregateOperation;
+import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
+import org.bson.types.ObjectId;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.stereotype.Repository;
+import org.springframework.util.CollectionUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.springframework.data.mongodb.core.aggregation.Aggregation.*;
+
+@Repository
+public interface AuthorRepo extends MongoRepository<Author, ObjectId>, AuthorRepoCustom {
+    default Author getById(ObjectId id){
+        return findById(id).orElseThrow(() -> new NotFoundException(Author.class, id));
+    }
+    List<Author> findAllById(Iterable<ObjectId> ids);
+}
+interface AuthorRepoCustom{
+    List<Author> searchAuthors(Page page, SearchAuthorsQuery query);
+}
+
+@RequiredArgsConstructor
+class AuthorRepoCustomImpl implements AuthorRepoCustom{
+    private final MongoTemplate mongoTemplate;
+
+
+    @Override
+    public List<Author> searchAuthors(Page page, SearchAuthorsQuery query) {
+        List<AggregationOperation> operations = new ArrayList<>();
+
+        List<Criteria> criteriaList = new ArrayList<>();
+        if(!StringUtils.isEmpty(query.getId())){
+            criteriaList.add(Criteria.where("id").is(new ObjectId(query.getId())));
+        }
+        if(!StringUtils.isEmpty(query.getCreatorId())){
+            criteriaList.add(Criteria.where("creatorId").is(new ObjectId(query.getCreatorId())));
+        }
+        if(query.getCreatedAtStart() != null){
+            criteriaList.add(Criteria.where("createdAt").gte(query.getCreatedAtStart()));
+        }
+        if(query.getCreatedAtEnd() != null){
+            criteriaList.add(Criteria.where("createdAt").gte(query.getCreatedAtEnd()));
+        }
+        if(!StringUtils.isEmpty(query.getFullName())){
+            criteriaList.add(Criteria.where("fullName").regex(query.getFullName(), "i"));
+        }
+        if(!CollectionUtils.isEmpty(query.getGenres())){
+            criteriaList.add(Criteria.where("genres").all(query.getGenres()));
+        }
+        if(!criteriaList.isEmpty()){
+            Criteria authorCriteria = new Criteria().andOperator(criteriaList.toArray(new Criteria[0]));
+            operations.add(match(authorCriteria));
+        }
+
+        criteriaList = new ArrayList<>();
+        if(!StringUtils.isEmpty(query.getBookId())){
+            criteriaList.add(Criteria.where("book._id").is(new ObjectId(query.getBookId())));
+        }
+        if(!StringUtils.isEmpty(query.getBookTitle())){
+            criteriaList.add(Criteria.where("book.title").regex(query.getBookTitle(), "i"));
+        }
+
+        if(!criteriaList.isEmpty()){
+            Criteria bookCriteria = new Criteria().andOperator(criteriaList.toArray(new Criteria[0]));
+            operations.add(lookup("books", "bookIds", "_id", "book"));
+            operations.add(unwind("book", false));
+            operations.add(match(bookCriteria));
+        }
+
+        operations.add(sort(Sort.Direction.DESC, "createdAt"));
+        operations.add(skip((page.getNumber() - 1) * page.getLimit()));
+        operations.add(limit(page.getLimit()));
+
+        TypedAggregation<Author> aggregation = newAggregation(Author.class, operations);
+        AggregationResults<Author> results = mongoTemplate.aggregate(aggregation, Author.class);
+
+        return results.getMappedResults();
+    }
+}
