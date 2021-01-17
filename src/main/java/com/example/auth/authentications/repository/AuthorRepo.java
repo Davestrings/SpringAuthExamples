@@ -4,7 +4,6 @@ import com.example.auth.authentications.domain.dto.Page;
 import com.example.auth.authentications.domain.dto.SearchAuthorsQuery;
 import com.example.auth.authentications.domain.exception.NotFoundException;
 import com.example.auth.authentications.domain.model.Author;
-import com.mongodb.internal.operation.AggregateOperation;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.bson.types.ObjectId;
